@@ -1,0 +1,253 @@
+-- =====================================================
+-- 1. СОЗДАНИЕ ТАБЛИЧНОГО ПРОСТРАНСТВА
+-- =====================================================
+
+-- Создание табличного пространства для физического хранения данных
+-- ВНИМАНИЕ! Перед выполнением создайте папку E:\tablespace\vodoleev_tbsp
+-- ИЛИ измените путь на существующую папку
+CREATE TABLESPACE IF NOT EXISTS vodoleev_tbsp
+    OWNER postgres
+    LOCATION 'E:\tablespace\vodoleev_tbsp';
+
+
+-- =====================================================
+-- 2. СОЗДАНИЕ РОЛИ ПОЛЬЗОВАТЕЛЯ
+-- =====================================================
+
+-- Создание роли app с правом входа и паролем
+CREATE ROLE IF NOT EXISTS app WITH
+    LOGIN
+    PASSWORD '123456789';
+
+
+-- =====================================================
+-- 3. СОЗДАНИЕ БАЗЫ ДАННЫХ
+-- =====================================================
+
+-- Создание базы данных в табличном пространстве
+CREATE DATABASE vodoleev
+    WITH
+    OWNER = postgres
+    ENCODING = 'UTF8'
+    TABLESPACE = vodoleev_tbsp;
+
+
+-- =====================================================
+-- ВНИМАНИЕ! 
+-- Теперь нужно подключиться к базе данных vodoleev вручную:
+-- В pgAdmin: выберите базу данных vodoleev и выполните ОСТАЛЬНУЮ ЧАСТЬ скрипта
+-- В psql: выполните команду \c vodoleev;
+-- =====================================================
+
+
+-- =====================================================
+-- ОСТАЛЬНУЮ ЧАСТЬ СКРИПТА ВЫПОЛНЯТЬ ПОСЛЕ ПОДКЛЮЧЕНИЯ К БАЗЕ vodoleev
+-- =====================================================
+
+
+-- 4. СОЗДАНИЕ СХЕМЫ
+CREATE SCHEMA IF NOT EXISTS app AUTHORIZATION app;
+
+-- Настройка поискового пути для роли app
+ALTER ROLE app IN DATABASE vodoleev SET search_path TO app;
+
+-- Предоставление прав на создание объектов в схеме
+GRANT CREATE ON SCHEMA app TO app;
+
+-- Предоставление прав на использование схемы
+GRANT USAGE ON SCHEMA app TO app;
+
+
+-- 5. СОЗДАНИЕ ТАБЛИЦ
+
+-- 5.1. Таблица partner_types (Типы партнеров)
+CREATE TABLE IF NOT EXISTS app.partner_types (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- 5.2. Таблица products (Продукция)
+CREATE TABLE IF NOT EXISTS app.products (
+    id SERIAL PRIMARY KEY,
+    article VARCHAR(50) NOT NULL UNIQUE,
+    type VARCHAR(100),
+    name VARCHAR(255) NOT NULL,
+    min_partner_price DECIMAL(18,2) NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- 5.3. Таблица partners (Партнеры)
+CREATE TABLE IF NOT EXISTS app.partners (
+    id SERIAL PRIMARY KEY,
+    partner_type_id INTEGER NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    legal_address VARCHAR(500),
+    inn VARCHAR(20),
+    director_name VARCHAR(255),
+    phone VARCHAR(20),
+    email VARCHAR(100),
+    rating INTEGER NOT NULL DEFAULT 0 CHECK (rating >= 0),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    
+    CONSTRAINT fk_partners_partner_type 
+        FOREIGN KEY (partner_type_id) 
+        REFERENCES app.partner_types(id) 
+        ON DELETE RESTRICT
+);
+
+-- 5.4. Таблица sale_histories (История продаж)
+CREATE TABLE IF NOT EXISTS app.sale_histories (
+    id SERIAL PRIMARY KEY,
+    partner_id INTEGER NOT NULL,
+    product_id INTEGER NOT NULL,
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    sale_date TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMP DEFAULT NOW(),
+    
+    CONSTRAINT fk_sale_histories_partner 
+        FOREIGN KEY (partner_id) 
+        REFERENCES app.partners(id) 
+        ON DELETE CASCADE,
+    
+    CONSTRAINT fk_sale_histories_product 
+        FOREIGN KEY (product_id) 
+        REFERENCES app.products(id) 
+        ON DELETE RESTRICT
+);
+
+
+-- 6. СОЗДАНИЕ ИНДЕКСОВ
+
+CREATE INDEX IF NOT EXISTS idx_partners_partner_type ON app.partners(partner_type_id);
+CREATE INDEX IF NOT EXISTS idx_sale_histories_partner ON app.sale_histories(partner_id);
+CREATE INDEX IF NOT EXISTS idx_sale_histories_product ON app.sale_histories(product_id);
+CREATE INDEX IF NOT EXISTS idx_sale_histories_date ON app.sale_histories(sale_date);
+CREATE INDEX IF NOT EXISTS idx_partners_name ON app.partners(name);
+
+
+-- 7. НАСТРОЙКА ПРАВ ДОСТУПА
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA app TO app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA app TO app;
+
+
+-- 8. ЗАПОЛНЕНИЕ ТЕСТОВЫМИ ДАННЫМИ
+
+-- 8.1. Заполнение справочника типов партнеров
+INSERT INTO app.partner_types (name) VALUES
+('ООО'),
+('ИП'),
+('ЗАО'),
+('ПАО'),
+('АО')
+ON CONFLICT DO NOTHING;
+
+-- 8.2. Заполнение справочника продукции
+INSERT INTO app.products (article, type, name, min_partner_price) VALUES
+('LAM-001', 'Ламинат', 'Ламинат Дуб Сонома 32 класс', 850.50),
+('LAM-002', 'Ламинат', 'Ламинат Дуб Кембридж 33 класс', 1200.00),
+('LAM-003', 'Ламинат', 'Ламинат Ясень Светлый 32 класс', 950.00),
+('PLINT-001', 'Плинтус', 'Плинтус ПВХ белый 2.5м', 150.00),
+('PLINT-002', 'Плинтус', 'Плинтус деревянный дуб 2м', 450.00),
+('TILE-001', 'Плитка', 'Плитка керамическая 60x60 белая', 950.00),
+('TILE-002', 'Плитка', 'Плитка керамическая 30x30 бежевая', 650.00),
+('PARQUET-001', 'Паркет', 'Паркетная доска дуб массив', 2500.00)
+ON CONFLICT (article) DO NOTHING;
+
+-- 8.3. Заполнение таблицы партнеров
+INSERT INTO app.partners (partner_type_id, name, legal_address, inn, director_name, phone, email, rating) VALUES
+(1, 'ООО "СтройМир"', 'г. Москва, ул. Строителей, д.1', '7701123456', 'Иванов Иван Иванович', '+7(495)123-45-67', 'info@stroymir.ru', 95),
+(1, 'ООО "ДомСтрой"', 'г. Москва, ул. Ленина, д.10', '7701987654', 'Петров Петр Петрович', '+7(495)987-65-43', 'info@domstroy.ru', 80),
+(2, 'ИП Сидоров', 'г. Москва, ул. Тверская, д.5', '7701567890', 'Сидоров Сидор Сидорович', '+7(495)456-78-90', 'sidorov@mail.ru', 60),
+(3, 'ЗАО "Покрытия"', 'г. Санкт-Петербург, ул. Морская, д.20', '7801123456', 'Смирнов Алексей Владимирович', '+7(812)123-45-67', 'info@pokritiya.ru', 45),
+(4, 'ПАО "СтройИндустрия"', 'г. Екатеринбург, ул. Строителей, д.5', '6601123456', 'Кузнецов Андрей Викторович', '+7(343)123-45-67', 'info@stroyindustry.ru', 70),
+(5, 'АО "Торговый Дом"', 'г. Новосибирск, ул. Коммерческая, д.15', '5401123456', 'Попов Дмитрий Сергеевич', '+7(383)123-45-67', 'info@td.ru', 55)
+ON CONFLICT DO NOTHING;
+
+-- 8.4. Заполнение истории продаж
+INSERT INTO app.sale_histories (partner_id, product_id, quantity, sale_date) VALUES
+-- Продажи ООО "СтройМир"
+(1, 1, 150, '2024-01-15 10:30:00'),
+(1, 2, 75, '2024-01-20 14:15:00'),
+(1, 4, 300, '2024-02-01 11:00:00'),
+(1, 1, 200, '2024-02-15 09:45:00'),
+(1, 8, 50, '2024-03-10 13:20:00'),
+
+-- Продажи ООО "ДомСтрой"
+(2, 3, 100, '2024-01-10 12:00:00'),
+(2, 5, 50, '2024-01-25 16:30:00'),
+(2, 8, 30, '2024-02-05 13:20:00'),
+(2, 1, 80, '2024-03-15 11:00:00'),
+
+-- Продажи ИП Сидоров
+(3, 6, 500, '2024-01-18 10:00:00'),
+(3, 7, 400, '2024-02-10 11:30:00'),
+(3, 4, 200, '2024-03-05 14:45:00'),
+
+-- Продажи ЗАО "Покрытия"
+(4, 2, 60, '2024-01-22 14:45:00'),
+(4, 8, 20, '2024-02-18 15:15:00'),
+(4, 3, 45, '2024-03-20 09:30:00'),
+
+-- Продажи ПАО "СтройИндустрия"
+(5, 1, 300, '2024-02-01 10:00:00'),
+(5, 2, 150, '2024-02-15 12:00:00'),
+(5, 8, 100, '2024-03-01 11:30:00'),
+
+-- Продажи АО "Торговый Дом"
+(6, 5, 80, '2024-02-10 09:00:00'),
+(6, 6, 120, '2024-02-20 10:30:00'),
+(6, 7, 90, '2024-03-10 14:00:00')
+ON CONFLICT DO NOTHING;
+
+
+-- 9. СОЗДАНИЕ ФУНКЦИИ ДЛЯ РАСЧЕТА СКИДКИ
+
+CREATE OR REPLACE FUNCTION app.calculate_partner_discount(
+    p_partner_id INTEGER
+) RETURNS DECIMAL(5,2) AS $$
+DECLARE
+    v_total_sales DECIMAL(18,2);
+    v_discount DECIMAL(5,2);
+BEGIN
+    SELECT COALESCE(SUM(sh.quantity * p.min_partner_price), 0)
+    INTO v_total_sales
+    FROM app.sale_histories sh
+    JOIN app.products p ON sh.product_id = p.id
+    WHERE sh.partner_id = p_partner_id;
+    
+    IF v_total_sales < 10000 THEN
+        v_discount := 0;
+    ELSIF v_total_sales < 50000 THEN
+        v_discount := 5;
+    ELSIF v_total_sales < 300000 THEN
+        v_discount := 10;
+    ELSE
+        v_discount := 15;
+    END IF;
+    
+    RETURN v_discount;
+END;
+$$ LANGUAGE plpgsql;
+
+
+-- 10. ПРОВЕРОЧНЫЙ ЗАПРОС
+SELECT 
+    p.name AS "Партнер",
+    pt.name AS "Тип",
+    COUNT(sh.id) AS "Кол-во продаж",
+    COALESCE(SUM(sh.quantity * pr.min_partner_price), 0)::numeric(10,2) AS "Общая сумма",
+    CASE
+        WHEN COALESCE(SUM(sh.quantity * pr.min_partner_price), 0) < 10000 THEN '0%'
+        WHEN COALESCE(SUM(sh.quantity * pr.min_partner_price), 0) < 50000 THEN '5%'
+        WHEN COALESCE(SUM(sh.quantity * pr.min_partner_price), 0) < 300000 THEN '10%'
+        ELSE '15%'
+    END AS "Скидка"
+FROM app.partners p
+LEFT JOIN app.partner_types pt ON p.partner_type_id = pt.id
+LEFT JOIN app.sale_histories sh ON p.id = sh.partner_id
+LEFT JOIN app.products pr ON sh.product_id = pr.id
+GROUP BY p.id, p.name, pt.name
+ORDER BY "Общая сумма" DESC;
